@@ -5,6 +5,9 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $modsDir = Join-Path $root 'instance\mods'
 $configDir = Join-Path $root 'instance\config'
+$repoOwner = 'Shix-0'
+$repoName = 'fabric-launcher-1.21.1'
+$repoBranch = 'main'
 New-Item -ItemType Directory -Force -Path $modsDir, $configDir | Out-Null
 
 $form = New-Object System.Windows.Forms.Form
@@ -32,7 +35,7 @@ $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(192, 201, 214)
 $form.Controls.Add($subtitle)
 
 $listLabel = New-Object System.Windows.Forms.Label
-$listLabel.Text = 'MODY W TYM LAUNCHERZE'
+$listLabel.Text = 'ZATWIERDZONE MODY'
 $listLabel.Location = New-Object System.Drawing.Point(31, 106)
 $listLabel.AutoSize = $true
 $listLabel.ForeColor = [System.Drawing.Color]::FromArgb(192, 201, 214)
@@ -53,7 +56,7 @@ $status.Location = New-Object System.Drawing.Point(31, 397)
 $status.Size = New-Object System.Drawing.Size(680, 24)
 $status.Anchor = 'Bottom, Left, Right'
 $status.ForeColor = [System.Drawing.Color]::FromArgb(192, 201, 214)
-$status.Text = 'Mody są przechowywane w folderze instance\mods.'
+$status.Text = 'Przy starcie launcher pobiera zatwierdzony zestaw modów.'
 $form.Controls.Add($status)
 
 function Refresh-ModList {
@@ -61,7 +64,72 @@ function Refresh-ModList {
     Get-ChildItem -LiteralPath $modsDir -Filter '*.jar' -File | Sort-Object Name | ForEach-Object {
         [void]$list.Items.Add($_.Name)
     }
-    $status.Text = "Liczba modów: $($list.Items.Count)   •   Folder: instance\mods"
+    $status.Text = "Liczba zatwierdzonych modów: $($list.Items.Count)   •   Minecraft 1.21.1 Fabric"
+}
+
+function Get-GitBlobSha1([string]$path) {
+    $content = [System.IO.File]::ReadAllBytes($path)
+    $prefix = [System.Text.Encoding]::ASCII.GetBytes(('blob ' + $content.Length + [char]0))
+    $payload = New-Object byte[] ($prefix.Length + $content.Length)
+    [Array]::Copy($prefix, 0, $payload, 0, $prefix.Length)
+    [Array]::Copy($content, 0, $payload, $prefix.Length, $content.Length)
+    $sha = [System.Security.Cryptography.SHA1]::Create()
+    try {
+        return [BitConverter]::ToString($sha.ComputeHash($payload)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Sync-RemoteMods {
+    $status.Text = 'Sprawdzam zatwierdzone mody w GitHub...'
+    [System.Windows.Forms.Application]::DoEvents()
+    $stageDir = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
+    $updates = New-Object 'System.Collections.Generic.List[object]'
+    $known = @{}
+    try {
+        New-Item -ItemType Directory -Path $stageDir | Out-Null
+        $apiUrl = "https://api.github.com/repos/$repoOwner/$repoName/contents/mods?ref=$repoBranch"
+        $headers = @{
+            'User-Agent' = 'FabricLauncher'
+            'Accept' = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+        }
+        $entries = @(Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec 20)
+        $jarEntries = @($entries | Where-Object { $_.type -eq 'file' -and $_.name -match '^[A-Za-z0-9._ -]+\.jar$' })
+
+        foreach ($entry in $jarEntries) {
+            if ($known.ContainsKey($entry.name)) { throw "Powtarzająca się nazwa moda: $($entry.name)" }
+            if (-not $entry.download_url -or $entry.download_url -notmatch '^https://raw\.githubusercontent\.com/') {
+                throw "Nieprawidłowy adres moda: $($entry.name)"
+            }
+            $known[$entry.name] = $true
+            $destination = Join-Path $modsDir $entry.name
+            if ((Test-Path -LiteralPath $destination -PathType Leaf) -and (Get-GitBlobSha1 $destination) -eq $entry.sha) {
+                continue
+            }
+
+            $stagedFile = Join-Path $stageDir $entry.name
+            Invoke-WebRequest -Uri $entry.download_url -OutFile $stagedFile -TimeoutSec 60 -UseBasicParsing
+            if ((Get-GitBlobSha1 $stagedFile) -ne $entry.sha) { throw "Nie zgadza się suma pliku: $($entry.name)" }
+            $updates.Add([pscustomobject]@{ Source = $stagedFile; Destination = $destination })
+        }
+
+        foreach ($update in $updates) {
+            Move-Item -LiteralPath $update.Source -Destination $update.Destination -Force
+        }
+        Get-ChildItem -LiteralPath $modsDir -Filter '*.jar' -File | Where-Object { -not ($known.ContainsKey($_.Name)) } | Remove-Item -Force
+        return $true
+    }
+    catch {
+        $status.Text = 'Nie udało się pobrać aktualizacji. Zachowałem dotychczasowe pliki modów.'
+        [System.Windows.Forms.MessageBox]::Show("Nie udało się zsynchronizować modów z GitHub.`n`n$($_.Exception.Message)`n`nDotychczasowe mody pozostają na miejscu.", 'Synchronizacja modów', 'OK', 'Warning') | Out-Null
+        return $false
+    }
+    finally {
+        if (Test-Path -LiteralPath $stageDir) { Remove-Item -LiteralPath $stageDir -Recurse -Force }
+    }
 }
 
 function New-Button($text, $x, $y, $width) {
@@ -78,35 +146,20 @@ function New-Button($text, $x, $y, $width) {
     return $button
 }
 
-$addButton = New-Button 'Dodaj mody (.jar)' 31 435 175
-$addButton.Add_Click({
-    $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Title = 'Wybierz mody Fabric dla Minecraft 1.21.1'
-    $dialog.Filter = 'Pliki modów (*.jar)|*.jar'
-    $dialog.Multiselect = $true
-    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        foreach ($file in $dialog.FileNames) {
-            $destination = Join-Path $modsDir ([IO.Path]::GetFileName($file))
-            if ((Resolve-Path -LiteralPath $file).Path -ne $destination) {
-                Copy-Item -LiteralPath $file -Destination $destination -Force
-            }
-        }
-        Refresh-ModList
-    }
+$syncButton = New-Button 'Sprawdź aktualizacje' 31 435 170
+$syncButton.Add_Click({
+    if (Sync-RemoteMods) { Refresh-ModList }
 })
 
-$removeButton = New-Button 'Usuń zaznaczony' 218 435 160
-$removeButton.Add_Click({
-    if ($list.SelectedItem) {
-        Remove-Item -LiteralPath (Join-Path $modsDir ([string]$list.SelectedItem)) -Force
-        Refresh-ModList
-    }
-})
-
-$folderButton = New-Button 'Otwórz folder modów' 390 435 185
+$folderButton = New-Button 'Folder modów' 211 435 160
 $folderButton.Add_Click({ Start-Process explorer.exe -ArgumentList "`"$modsDir`"" })
 
-$exportButton = New-Button 'Spakuj do ZIP' 587 435 124
+$manageButton = New-Button 'Dodaj / aktualizuj mody' 383 435 190
+$manageButton.Add_Click({
+    Start-Process "https://github.com/$repoOwner/$repoName/upload/main/mods"
+})
+
+$exportButton = New-Button 'Spakuj ZIP' 586 435 125
 $exportButton.Anchor = 'Bottom, Right'
 $exportButton.Add_Click({
     $dialog = New-Object System.Windows.Forms.SaveFileDialog
@@ -117,9 +170,12 @@ $exportButton.Add_Click({
         $temporaryZip = Join-Path $env:TEMP ([Guid]::NewGuid().ToString() + '.zip')
         Compress-Archive -Path (Join-Path $root '*') -DestinationPath $temporaryZip -CompressionLevel Optimal
         Move-Item -LiteralPath $temporaryZip -Destination $dialog.FileName -Force
-        [System.Windows.Forms.MessageBox]::Show("Gotowe. W archiwum są launcher i dodane mody.`n`nKażda osoba musi zalogować się na własne konto Microsoft i posiadać Minecraft Java Edition.", 'Paczka launchera', 'OK', 'Information') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show("Gotowe. W archiwum są launcher i aktualne mody.`n`nKażda osoba musi zalogować się na własne konto Microsoft i posiadać Minecraft Java Edition.", 'Paczka launchera', 'OK', 'Information') | Out-Null
     }
 })
 
 Refresh-ModList
+$form.Add_Shown({
+    if (Sync-RemoteMods) { Refresh-ModList }
+})
 [void]$form.ShowDialog()
