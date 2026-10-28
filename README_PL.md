@@ -4,7 +4,9 @@ Prototyp menedżera modów przygotowany pod **Minecraft Java 1.21.1 + Fabric**.
 
 ## Uruchomienie
 
-Kliknij dwukrotnie `Start.bat`. Launcher sprawdza publiczny folder `mods` w repozytorium GitHub i pobiera zmienione pliki `.jar` do `instance\mods`. Przycisk **Sprawdź aktualizacje** wykonuje to samo ręcznie. Dodatkowe lokalne pliki `.jar` są usuwane podczas udanej synchronizacji, aby przywrócić zatwierdzony zestaw.
+Kliknij dwukrotnie `Launcher.exe` (albo `Start.bat`). Program uruchamia prototyp interfejsu i synchronizacji. Launcher sprawdza publiczny folder `mods` w repozytorium GitHub i pobiera zmienione pliki `.jar` do `instance\mods`. Przycisk **Sprawdź aktualizacje** wykonuje to samo ręcznie. Dodatkowe lokalne pliki `.jar` są usuwane podczas udanej synchronizacji, aby przywrócić zatwierdzony zestaw.
+
+Ikona `Launcher.ico` jest tymczasowa. Po jej podmianie `Build-Launcher.ps1` odświeża ikonę w pliku EXE. Plik EXE uruchamia skrypt `launcher.ps1`, dlatego trzeba rozpakować cały folder. Gotową paczkę ZIP z plikiem EXE udostępnia właściciel osobno; repozytorium GitHub nie służy do pobierania launchera.
 
 ## Dodawanie i aktualizowanie modów
 
