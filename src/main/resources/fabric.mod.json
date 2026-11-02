@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "bdsmp_bye_bye_buttons",
+  "version": "${version}",
+  "name": "BDSMP Menu Cleanup",
+  "description": "Hides the vanilla image-only Language and Accessibility controls from the title screen.",
+  "authors": ["BDSMP"],
+  "license": "MIT",
+  "environment": "client",
+  "mixins": [
+    {
+      "config": "bdsmp_bye_bye_buttons.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.20.1",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  }
+}
