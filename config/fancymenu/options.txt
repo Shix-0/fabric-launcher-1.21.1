@@ -1,0 +1,2 @@
+modpack_mode = true
+show_welcome_screen = false
